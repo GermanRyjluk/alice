@@ -29,7 +29,7 @@ import { genData, genPosition, genWeather } from './simulation';
 const defaultConfig = { bikeName: 'taurusx', trackName: 'bm' };
 
 const Dashboard = () => {
-  const isMounted = useIsMounted();
+    const isMounted = useIsMounted();
 
   const [data, setData] = useState<IData>();
   const [history, setHistory] = useState<IHistory>();
@@ -42,8 +42,10 @@ const Dashboard = () => {
   const [connected, setConnected] = useState<boolean>();
   const [logged, setLogged] = useState<boolean>(isLogged());
 
+  const [message, setMessage] = useState('');
+
   /* Fetch data every second */
-  const [, setPolling] = usePolling(() => fetchData(), 1000);
+  const [, setPolling] = usePolling(() => runServer(), 1000);
 
   const updateHistory = useCallback(
     (history) => {
@@ -87,38 +89,81 @@ const Dashboard = () => {
     },
     [isMounted, modalOpen]
   );
-
-  const fetchData = useCallback(async () => {
-    const c = await api.getConfig();
-    await updateConfig(c);
-
-    // run simulation
-    if (process.env.REACT_APP_SIMULATION === 'true') {
+  
+  const runSimulation = useCallback(
+    () => {
+      setInterval(() => {
       const data: IData = genData();
       const position: { latitude: string; longitude: string } = genPosition();
       const wData = genWeather();
-
       updateData(Object.assign(data, position), wData);
-    } else {
-      const data = await api.getData(c.bikeName);
-      const wData = await api.getWeatherSingleStation('ws1');
-      updateData(data, wData);
+      }, 1000);
+    },
+    [updateData],
+  )
 
-      if (!history) {
-        const h = await api.getHistory(c.bikeName, numElement);
-        updateHistory(h);
-      }
+  const runServer = useCallback(
+    async() => {
+      setMessage("Waiting for server...");
+      const c = await api.getConfig();
 
-      if (data.connected !== Boolean(connected)) {
-        setConnected(data.connected);
+      if (c !== undefined){
+        await updateConfig(c);
+  
+        const data = await api.getData(c.bikeName);
+        const wData = await api.getWeatherSingleStation('ws1');
+        console.log(data);
+        updateData(data, wData);
+  
+        if (!history) {
+          const h = await api.getHistory(c.bikeName, numElement);
+          updateHistory(h);
+        }
+  
+        if (data.connected !== Boolean(connected)) {
+          setConnected(data.connected);
+        }
+        setPolling(true);
+      }else{
+        setMessage("Error fetching config");
+        runSimulation();
       }
-    }
-  }, [updateConfig, updateData, history, connected, updateHistory]);
+      setMessage("Waiting ended, starting simulation");
+    },
+    [connected, history, updateConfig, updateData, updateHistory, setPolling, runSimulation],
+  )
+  
+  // const fetchData = useCallback(async () => {
+  //   const c = await api.getConfig();
+  //   await updateConfig(c);
+
+  //   // run simulation
+  //   if (process.env.REACT_APP_SIMULATION === 'true') {
+  //     const data: IData = genData();
+  //     const position: { latitude: string; longitude: string } = genPosition();
+  //     const wData = genWeather();
+
+  //     updateData(Object.assign(data, position), wData);
+  //   } else {
+  //     const data = await api.getData(c.bikeName);
+  //     const wData = await api.getWeatherSingleStation('ws1');
+  //     if (data == null) console.log("Data: null");
+  //     updateData(data, wData);
+
+  //     if (!history) {
+  //       const h = await api.getHistory(c.bikeName, numElement);
+  //       updateHistory(h);
+  //     }
+
+  //     if (data.connected !== Boolean(connected)) {
+  //       setConnected(data.connected);
+  //     }
+  //   }
+  // }, [updateConfig, updateData, history, connected, updateHistory]);
 
   useEffect(() => {
-    fetchData();
-    setPolling(true);
-  }, [fetchData, setPolling]);
+    runServer();
+  }, [runServer]);
 
   useEffect(() => {
     if (connected) {
@@ -128,9 +173,15 @@ const Dashboard = () => {
     }
   }, [connected]);
 
-  /* If there is no data yet, show blank screen */
+  /* If server "ERR_CONNECTION_TIMED_OUT", show button to start simulation */
   if (!data || !weather) {
-    return null;
+    return (
+      <div>
+        <h5>{message}</h5>
+        {/* <button onClick={()=>runSimulation()}>Avvia simulazione</button>
+        <button onClick={()=>runServer()}>Riprova server</button> */}
+      </div>
+    );
   }
 
   return (
